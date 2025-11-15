@@ -1,6 +1,7 @@
 import os,random,hashlib,time,math
 from collections import Counter
 from Crypto.PublicKey import RSA
+from typing import Union, Tuple
 
 class LowEntropySim:
     def __init__(self,bits=16):
@@ -94,6 +95,112 @@ class NISTTests:
         p = math.exp(-2 * len(bits) * ApEn)
         return p
 
+    @staticmethod
+    def chi_square(bits: str, num_bins: int = 16, return_statistic: bool = False) -> Union[float, Tuple[float, float]]:
+        """Chi-square test for uniformity of random bits.
+        Divides bits into bytes and checks if byte values are uniformly distributed.
+        
+        Args:
+            bits: Binary string to test
+            num_bins: Number of bins for chi-square test (default 16)
+            return_statistic: If True, returns (statistic, p_value), else just p_value
+        
+        Returns:
+            Union[float, Tuple[float, float]]: Either p_value alone or (chi_square_statistic, p_value)
+        """
+        n = len(bits)
+        if n < 8:
+            return (0.0, 0.0) if return_statistic else 0.0
+        
+        # Convert bits to bytes
+        byte_values = []
+        for i in range(0, n - 7, 8):
+            byte_str = bits[i:i+8]
+            byte_val = int(byte_str, 2)
+            byte_values.append(byte_val)
+        
+        if len(byte_values) < num_bins:
+            return (0.0, 0.0) if return_statistic else 0.0
+        
+        # Count frequencies for all 256 possible byte values
+        observed = [0] * 256
+        for val in byte_values:
+            observed[val] += 1
+        
+        # Expected frequency for uniform distribution
+        expected = len(byte_values) / 256
+        
+        # Calculate chi-square statistic
+        chi_sq = sum((obs - expected)**2 / expected for obs in observed if expected > 0)
+        
+        # Degrees of freedom = 256 - 1 = 255
+        df = 255
+        
+        # Calculate p-value using incomplete gamma function (upper tail)
+        # P(X >= chi_sq) where X ~ chi-square(df)
+        # Using the regularized incomplete gamma function: Q(df/2, chi_sq/2)
+        def igamc(a, x):
+            """Complementary incomplete gamma function (upper tail)"""
+            if x < 0 or a <= 0:
+                return 0.0
+            if x == 0:
+                return 1.0
+            
+            # Use continued fraction expansion for better accuracy
+            ax = a * math.log(x) - x - math.lgamma(a)
+            if ax < -700:
+                return 0.0
+            
+            ax = math.exp(ax)
+            
+            # Continued fraction
+            y = 1.0 - a
+            z = x + y + 1.0
+            c = 0.0
+            pkm2 = 1.0
+            qkm2 = x
+            pkm1 = x + 1.0
+            qkm1 = z * x
+            ans = pkm1 / qkm1
+            
+            for i in range(100):
+                c += 1.0
+                y += 1.0
+                z += 2.0
+                yc = y * c
+                pk = pkm1 * z - pkm2 * yc
+                qk = qkm1 * z - qkm2 * yc
+                
+                if qk != 0:
+                    r = pk / qk
+                    t = abs((ans - r) / r)
+                    ans = r
+                    
+                    if t < 1e-10:
+                        break
+                    
+                pkm2 = pkm1
+                pkm1 = pk
+                qkm2 = qkm1
+                qkm1 = qk
+                
+                # Rescale to prevent overflow
+                if abs(pk) > 1e30:
+                    pkm2 /= 1e30
+                    pkm1 /= 1e30
+                    qkm2 /= 1e30
+                    qkm1 /= 1e30
+            
+            return ans * ax
+        
+        try:
+            p_value = igamc(df / 2.0, chi_sq / 2.0)
+            p_value = max(0.0, min(1.0, p_value))
+        except:
+            p_value = 0.5
+        
+        return (chi_sq, p_value) if return_statistic else p_value
+
 class RSAUtil:
     @staticmethod
     def generate_key(size=1024,seed=None):
@@ -150,7 +257,8 @@ class Experiment:
             "block_frequency": 0,
             "runs": 0,
             "longest_run": 0,
-            "approx_entropy": 0
+            "approx_entropy": 0,
+            "chi_square": 0
         }
         total_tests = len(self.results)
         for idx,(key,*_ ) in enumerate(self.results):
@@ -160,12 +268,15 @@ class Experiment:
             p3 = NISTTests.runs(bits)
             p4 = NISTTests.longest_run(bits)
             p5 = NISTTests.approximate_entropy(bits)
+            chi_result = NISTTests.chi_square(bits, return_statistic=True)
+            chi_stat, p6 = chi_result if isinstance(chi_result, tuple) else (0.0, chi_result)
 
             if p1 >= 0.01: nist_summary["frequency_test"] += 1
             if p2 >= 0.01: nist_summary["block_frequency_test"] += 1
             if p3 >= 0.01: nist_summary["runs_test"] += 1
             if p4 >= 0.01: nist_summary["longest_run"] += 1
             if p5 >= 0.01: nist_summary["approx_entropy"] += 1
+            if p6 >= 0.01: nist_summary["chi_square"] += 1
 
             print(f"Key {idx+1}:")
             print(f"  Frequency test p={p1:.4f}")
@@ -173,6 +284,7 @@ class Experiment:
             print(f"  Runs test p={p3:.4f}")
             print(f"  Longest run p={p4:.4f}")
             print(f"  Approx entropy p={p5:.4f}")
+            print(f"  Chi-square test: χ²={chi_stat:.4f}, p={p6:.4f}")
             
         print(f"NIST Test Summary:")
         for test,passed in nist_summary.items():

@@ -35,12 +35,16 @@ class Phase3Compare:
             s["times"].append(t1)
             s["mods"].append(key.n)
             bits = NISTTests._to_bits(key.n)
+            chi_result = NISTTests.chi_square(bits, return_statistic=True)
+            chi_stat, chi_p = chi_result if isinstance(chi_result, tuple) else (0.0, chi_result)
             s["nist"].append({
                 "freq": NISTTests.frequency(bits),
                 "block": NISTTests.block_frequency(bits),
                 "runs": NISTTests.runs(bits),
                 "lrun": NISTTests.longest_run(bits),
-                "apent": NISTTests.approximate_entropy(bits)
+                "apent": NISTTests.approximate_entropy(bits),
+                "chi": chi_p,
+                "chi_stat": chi_stat
             })
 
             print(f"  fingerprint : {fp[:16]}...")
@@ -81,15 +85,25 @@ class Phase3Compare:
                 print(f"  Shared factors : {shared} pairs")
 
             passes = 0
-            total = len(s["nist"]) * 5
+            total = len(s["nist"]) * 6
             for entry in s["nist"]:
                 if entry["freq"]  >= 0.01: passes += 1
                 if entry["block"] >= 0.01: passes += 1
                 if entry["runs"]  >= 0.01: passes += 1
                 if entry["lrun"]  >= 0.01: passes += 1
                 if entry["apent"] >= 0.01: passes += 1
+                if entry["chi"]   >= 0.01: passes += 1
 
             print(f"  NIST pass rate : {passes}/{total} ({passes/total:.2%})")
+            
+            # Chi-square statistics
+            chi_stats = [entry["chi_stat"] for entry in s["nist"]]
+            chi_pvals = [entry["chi"] for entry in s["nist"]]
+            print(f"  Chi-square stats:")
+            print(f"    Avg χ² = {sum(chi_stats)/len(chi_stats):.4f}")
+            print(f"    Avg p-value = {sum(chi_pvals)/len(chi_pvals):.4f}")
+            print(f"    Min p-value = {min(chi_pvals):.4f}")
+            print(f"    Max p-value = {max(chi_pvals):.4f}")
 
         b = self.stats["baseline"]
         e = self.stats["emn"]
@@ -129,7 +143,7 @@ def main():
         return rf
     
     from phase2_emn import EMN_PRNG,SHA256CTR
-    emn = EMN_PRNG(P_seed=None,injection_frequency=4)
+    emn = EMN_PRNG(P_seed=None,injection_frequency=100)
     def emn_randfunc():
         O = emn.next_output()
         ctr = SHA256CTR(O)

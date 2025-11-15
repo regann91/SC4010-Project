@@ -20,7 +20,7 @@ def plot_nist_pass_rates(cmp):
     emn_nist = cmp.stats["emn"]["nist"]
 
     def calc_pass_rate(nist_list):
-        total_tests = len(nist_list) * 5
+        total_tests = len(nist_list) * 6
         passed = 0
         for entry in nist_list:
             if entry["freq"]  >= 0.01: passed += 1
@@ -28,6 +28,7 @@ def plot_nist_pass_rates(cmp):
             if entry["runs"]  >= 0.01: passed += 1
             if entry["lrun"]  >= 0.01: passed += 1
             if entry["apent"] >= 0.01: passed += 1
+            if entry["chi"]   >= 0.01: passed += 1
         return passed / total_tests
 
     baseline_rate = calc_pass_rate(baseline_nist)
@@ -38,6 +39,37 @@ def plot_nist_pass_rates(cmp):
     plt.ylabel("NIST Test Pass Rate (%)")
     plt.title("NIST SP 800-22 Test Pass Rate Comparison")
     plt.ylim(0,100)
+    plt.tight_layout()
+    plt.show()
+
+def plot_chi_square_comparison(cmp):
+    """Plot chi-square statistics for baseline vs EMN"""
+    baseline_chi = [entry["chi_stat"] for entry in cmp.stats["baseline"]["nist"]]
+    emn_chi = [entry["chi_stat"] for entry in cmp.stats["emn"]["nist"]]
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Chi-square statistics distribution
+    ax1.hist(baseline_chi, bins=20, alpha=0.6, label="Baseline RNG", color="red")
+    ax1.hist(emn_chi, bins=20, alpha=0.6, label="EMN-enhanced RNG", color="green")
+    ax1.axvline(255, color='black', linestyle='--', linewidth=1, label='Expected χ² (df=255)')
+    ax1.set_xlabel("Chi-square Statistic (χ²)")
+    ax1.set_ylabel("Frequency")
+    ax1.set_title("Chi-square Test Statistics Distribution")
+    ax1.legend()
+    
+    # P-values distribution
+    baseline_pvals = [entry["chi"] for entry in cmp.stats["baseline"]["nist"]]
+    emn_pvals = [entry["chi"] for entry in cmp.stats["emn"]["nist"]]
+    
+    ax2.hist(baseline_pvals, bins=20, alpha=0.6, label="Baseline RNG", color="red")
+    ax2.hist(emn_pvals, bins=20, alpha=0.6, label="EMN-enhanced RNG", color="green")
+    ax2.axvline(0.01, color='black', linestyle='--', linewidth=1, label='Significance Level (α=0.01)')
+    ax2.set_xlabel("Chi-square P-value")
+    ax2.set_ylabel("Frequency")
+    ax2.set_title("Chi-square P-values Distribution")
+    ax2.legend()
+    
     plt.tight_layout()
     plt.show()
 
