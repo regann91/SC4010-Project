@@ -73,6 +73,35 @@ def plot_chi_square_comparison(cmp):
     plt.tight_layout()
     plt.show()
 
+def plot_predictability_comparison(cmp):
+    """Plot predictability (correlation coefficient) for baseline vs EMN"""
+    baseline_pred = cmp.stats["baseline"]["predictability"]
+    emn_pred = cmp.stats["emn"]["predictability"]
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Histogram of correlation coefficients
+    ax1.hist(baseline_pred, bins=20, alpha=0.6, label="Baseline RNG", color="red")
+    ax1.hist(emn_pred, bins=20, alpha=0.6, label="EMN-enhanced RNG", color="green")
+    ax1.axvline(0, color='black', linestyle='--', linewidth=1, label='r = 0 (no correlation)')
+    ax1.set_xlabel("Correlation Coefficient (r)")
+    ax1.set_ylabel("Frequency")
+    ax1.set_title("Predictability: Correlation Between Successive Outputs")
+    ax1.legend()
+    
+    # Box plot comparison
+    ax2.boxplot([baseline_pred, emn_pred], 
+                labels=["Baseline RNG", "EMN RNG"],
+                showmeans=True,
+                patch_artist=True)
+    ax2.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
+    ax2.set_ylabel("Correlation Coefficient (r)")
+    ax2.set_title("Predictability Distribution Comparison")
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
 def analyze_implications(cmp):
     baseline_ents = cmp.stats["baseline"]["ents"]
     emn_ents = cmp.stats["emn"]["ents"]

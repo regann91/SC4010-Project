@@ -21,7 +21,7 @@ class SHA256CTR:
 
 
 class EMN_PRNG:
-    def __init__(self, P_seed=None, injection_frequency=100):
+    def __init__(self, P_seed=None, injection_frequency=10):
         self.f = injection_frequency # Entropy injection frequency
         self.counter = 0
         self.PRNG = random.Random() # PRNG instance (using MersenneTwister)
@@ -42,16 +42,19 @@ class EMN_PRNG:
             if self.counter % self.f == 0:
                 # Capture entropy
                 E = os.urandom(128)  # E ← OS.getrandom(128)
-                # Secure mixing S ← SHA512(S ⊕ E)
+                # Secure mixing S ← SHA512(S ⊕ E) Combine the captured entropy
+                # with the current PRNG state using a cryptographic hash function
                 S_XOR_E = bytes(s ^ e for s, e in zip(self.state, E))
-                h1 = hashlib.sha512(S_XOR_E).digest()
+                h1 = hashlib.sha512(S_XOR_E).digest(); 
                 h2 = hashlib.sha512(h1).digest()
                 self.state = h1 + h2  # S is updated to the new 128-byte hash
-            # Output
-            self.output_queue.put(R ^ int.from_bytes(self.state, 'big'))  # O ← S ⊕ R
-            # Update state
-            self.state = self.PRNG.getrandbits(1024).to_bytes(128, 'big')  # S ← P.getrandbits(1024)
-            self.counter += 1
+            # Output: Generate random numbers by combining the PRNG output R with the current state self.state using an XOR operation
+            output = R ^ int.from_bytes(self.state, 'big')  # O ← S ⊕ R
+            # Update state: S ← P.getrandbits(1024)
+            new_state_value = self.PRNG.getrandbits(1024)
+            self.state = new_state_value.to_bytes(128, 'big')
+
+            self.counter += 1; self.output_queue.put(output)
 
     def next_output(self) -> int:
         try: return self.output_queue.get(timeout=5) 
@@ -77,7 +80,7 @@ def shannon_entropy(data_bytes):
 
 
 class EMNExperiment:
-    def __init__(self,num_keys=10,injection_frequency=100,key_size=1024,verbose=True):
+    def __init__(self,num_keys=10,injection_frequency=10,key_size=1024,verbose=True):
         self.num_keys = int(num_keys)
         self.f = int(injection_frequency)
         self.key_size = int(key_size)
