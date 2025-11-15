@@ -1,3 +1,5 @@
+import queue
+import threading
 import os,random,hashlib,time,math,struct
 from collections import Counter
 from Crypto.PublicKey import RSA
@@ -19,31 +21,51 @@ class SHA256CTR:
 
 
 class EMN_PRNG:
-    def __init__(self,P_seed=None,injection_frequency=4):
-        import random
-        if P_seed is None:
-            P_seed = int.from_bytes(os.urandom(32),"big")
-        self.P = random.Random(P_seed) 
-        self.f = int(injection_frequency)
-        self.S = self.P.getrandbits(256)  
-        self.cycle = 0
+    def __init__(self, P_seed=None, injection_frequency=10):
+        self.f = injection_frequency # Entropy injection frequency
+        self.counter = 0
+        self.PRNG = random.Random() # PRNG instance (using MersenneTwister)
+        self.PRNG.seed(random.getrandbits(1024)) # PRNG state S ← P.seed(1024)
+        self.state: bytes = self.PRNG.getrandbits(1024).to_bytes(128, 'big')  # Current state S ← P.getrandbits(1024) as bytes
+        self._stop = False
+        # Thread-safe queue to hold generated random numbers (O)
+        self.output_queue = queue.Queue(maxsize=100000) # Max size can be adjusted
 
-    def _sha256_int(self,a_int):
-        b = a_int.to_bytes((a_int.bit_length() + 7) // 8 or 1,"big")
-        return int.from_bytes(hashlib.sha256(b).digest(),"big")
+        # Setup and start the generator thread
+        self.generator_thread = threading.Thread(target=self.start, daemon=True)
+        self.generator_thread.start()
 
-    def next_output(self):
-        self.cycle += 1
-        R = self.P.getrandbits(256)
+    def start(self):
+        while not self._stop: # Used instead of while True so we can stop the thread
+            # Generate
+            R = self.PRNG.getrandbits(1024)  # R ← P.getrandbits(1024)
+            if self.counter % self.f == 0:
+                # Capture entropy
+                E = os.urandom(128)  # E ← OS.getrandom(128)
+                # Secure mixing S ← SHA512(S ⊕ E) Combine the captured entropy
+                # with the current PRNG state using a cryptographic hash function
+                S_XOR_E = bytes(s ^ e for s, e in zip(self.state, E))
+                h1 = hashlib.sha512(S_XOR_E).digest(); 
+                h2 = hashlib.sha512(h1).digest()
+                self.state = h1 + h2  # S is updated to the new 128-byte hash
+            # Output: Generate random numbers by combining the PRNG output R with the current state self.state using an XOR operation
+            output = R ^ int.from_bytes(self.state, 'big')  # O ← S ⊕ R
+            # Update state: S ← P.getrandbits(1024)
+            new_state_value = self.PRNG.getrandbits(1024)
+            self.state = new_state_value.to_bytes(128, 'big')
 
-        if self.f > 0 and (self.cycle % self.f) == 0:
-            E = int.from_bytes(os.urandom(32),"big")
-            self.S = self._sha256_int(self.S ^ E)
+            self.counter += 1; self.output_queue.put(output)
 
-        O = self.S ^ R
-        self.S = self.P.getrandbits(256)
-        return O
+    def next_output(self) -> int:
+        try: return self.output_queue.get(timeout=5) 
+        except queue.Empty: raise RuntimeError("EMN generator thread stopped or failed to produce numbers.")
 
+    def stop(self):
+        self._stop = True
+        while not self.output_queue.empty():
+            # Discard any remaining items
+            self.output_queue.get_nowait()
+        self.generator_thread.join() # Wait for the thread to finish
 
 def shannon_entropy(data_bytes):
     if not data_bytes:
@@ -58,7 +80,7 @@ def shannon_entropy(data_bytes):
 
 
 class EMNExperiment:
-    def __init__(self,num_keys=10,injection_frequency=4,key_size=1024,verbose=True):
+    def __init__(self,num_keys=10,injection_frequency=10,key_size=1024,verbose=True):
         self.num_keys = int(num_keys)
         self.f = int(injection_frequency)
         self.key_size = int(key_size)
@@ -94,7 +116,7 @@ class EMNExperiment:
             t0 = time.time()
             O = emn.next_output()
             t1 = time.time() - t0
-            injected = (emn.cycle % self.f == 0) if self.f > 0 else False
+            injected = (emn.counter % self.f == 0) if self.f > 0 else False
             randfunc = self._randfunc_from_int(O)
             key = RSA.generate(self.key_size,randfunc=randfunc)
             fp = hashlib.sha256(f"{key.n}:{key.e}".encode()).hexdigest()

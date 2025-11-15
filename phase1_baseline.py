@@ -1,6 +1,9 @@
 import os,random,hashlib,time,math
 from collections import Counter
 from Crypto.PublicKey import RSA
+from typing import Union, Tuple
+import numpy as np
+from scipy.stats import chisquare
 
 class LowEntropySim:
     def __init__(self,bits=16):
@@ -94,6 +97,90 @@ class NISTTests:
         p = math.exp(-2 * len(bits) * ApEn)
         return p
 
+    @staticmethod
+    def chi_square(bits: str, num_bins: int = 16, return_statistic: bool = False) -> Union[float, Tuple[float, float]]:
+        """Chi-square test for uniformity of random bits.
+        Divides bits into bytes and checks if byte values are uniformly distributed.
+        
+        Args:
+            bits: Binary string to test
+            num_bins: Number of bins for chi-square test (default 16)
+            return_statistic: If True, returns (statistic, p_value), else just p_value
+        
+        Returns:
+            Union[float, Tuple[float, float]]: Either p_value alone or (chi_square_statistic, p_value)
+        """
+        
+        n = len(bits)
+        if n < 8:
+            return (0.0, 0.0) if return_statistic else 0.0
+        
+        # Convert bits to bytes
+        byte_values = []
+        for i in range(0, n - 7, 8):
+            byte_str = bits[i:i+8]
+            byte_val = int(byte_str, 2)
+            byte_values.append(byte_val)
+        
+        if len(byte_values) < num_bins:
+            return (0.0, 0.0) if return_statistic else 0.0
+        
+        # Count frequencies for all 256 possible byte values
+        observed = np.zeros(256, dtype=int)
+        for val in byte_values:
+            observed[val] += 1
+        
+        # Expected frequency for uniform distribution
+        expected = np.full(256, len(byte_values) / 256)
+        
+        # Calculate chi-square test using scipy
+        chi_sq, p_value = chisquare(f_obs=observed, f_exp=expected)
+        
+        return (chi_sq, p_value) if return_statistic else p_value
+
+    @staticmethod
+    def predictability(sequence: Union[bytes, list, np.ndarray]) -> float:
+        """Predictability test using correlation coefficient.
+        Assesses the correlation between successive RNG outputs.
+        
+        Formula: r = Σ(x_i - μ)(x_{i+1} - μ) / Σ(x_i - μ)²
+        
+        Args:
+            sequence: Sequence of RNG outputs (bytes, list, or numpy array)
+        
+        Returns:
+            float: Correlation coefficient. Value closer to zero indicates lower predictability.
+        """
+        # Convert to numpy array for efficient computation
+        if isinstance(sequence, bytes):
+            x = np.frombuffer(sequence, dtype=np.uint8)
+        elif isinstance(sequence, list):
+            x = np.array(sequence, dtype=np.float64)
+        else:
+            x = np.array(sequence, dtype=np.float64)
+        
+        n = len(x)
+        if n < 2:
+            return 0.0
+        
+        # Calculate mean
+        mu = np.mean(x)
+        
+        # Calculate numerator: Σ(x_i - μ)(x_{i+1} - μ)
+        # x[:-1] gives x_i, x[1:] gives x_{i+1}
+        numerator = np.sum((x[:-1] - mu) * (x[1:] - mu))
+        
+        # Calculate denominator: Σ(x_i - μ)²
+        denominator = np.sum((x - mu) ** 2)
+        
+        # Avoid division by zero
+        if denominator == 0:
+            return 0.0
+        
+        r = numerator / denominator
+        
+        return r
+
 class RSAUtil:
     @staticmethod
     def generate_key(size=1024,seed=None):
@@ -150,7 +237,8 @@ class Experiment:
             "block_frequency": 0,
             "runs": 0,
             "longest_run": 0,
-            "approx_entropy": 0
+            "approx_entropy": 0,
+            "chi_square": 0
         }
         total_tests = len(self.results)
         for idx,(key,*_ ) in enumerate(self.results):
@@ -160,12 +248,15 @@ class Experiment:
             p3 = NISTTests.runs(bits)
             p4 = NISTTests.longest_run(bits)
             p5 = NISTTests.approximate_entropy(bits)
+            chi_result = NISTTests.chi_square(bits, return_statistic=True)
+            chi_stat, p6 = chi_result if isinstance(chi_result, tuple) else (0.0, chi_result)
 
             if p1 >= 0.01: nist_summary["frequency_test"] += 1
             if p2 >= 0.01: nist_summary["block_frequency_test"] += 1
             if p3 >= 0.01: nist_summary["runs_test"] += 1
             if p4 >= 0.01: nist_summary["longest_run"] += 1
             if p5 >= 0.01: nist_summary["approx_entropy"] += 1
+            if p6 >= 0.01: nist_summary["chi_square"] += 1
 
             print(f"Key {idx+1}:")
             print(f"  Frequency test p={p1:.4f}")
@@ -173,6 +264,7 @@ class Experiment:
             print(f"  Runs test p={p3:.4f}")
             print(f"  Longest run p={p4:.4f}")
             print(f"  Approx entropy p={p5:.4f}")
+            print(f"  Chi-square test: χ²={chi_stat:.4f}, p={p6:.4f}")
             
         print(f"NIST Test Summary:")
         for test,passed in nist_summary.items():

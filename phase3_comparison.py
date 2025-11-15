@@ -14,8 +14,8 @@ class Phase3Compare:
         self.baseline_func = baseline_func
         self.emn_func = emn_func
         self.stats = {
-            "baseline": {"fps": [],"ents": [],"times": [],"mods": [],"nist": []},
-            "emn":      {"fps": [],"ents": [],"times": [],"mods": [],"nist": []},
+            "baseline": {"fps": [],"ents": [],"times": [],"mods": [],"nist": [],"predictability": []},
+            "emn":      {"fps": [],"ents": [],"times": [],"mods": [],"nist": [],"predictability": []},
         }
 
     def _run_side(self,label,randfunc):
@@ -35,12 +35,21 @@ class Phase3Compare:
             s["times"].append(t1)
             s["mods"].append(key.n)
             bits = NISTTests._to_bits(key.n)
+            chi_result = NISTTests.chi_square(bits, return_statistic=True)
+            chi_stat, chi_p = chi_result if isinstance(chi_result, tuple) else (0.0, chi_result)
+            
+            # Calculate predictability using modulus bytes
+            predictability_coef = NISTTests.predictability(mod_bytes)
+            s["predictability"].append(predictability_coef)
+            
             s["nist"].append({
                 "freq": NISTTests.frequency(bits),
                 "block": NISTTests.block_frequency(bits),
                 "runs": NISTTests.runs(bits),
                 "lrun": NISTTests.longest_run(bits),
-                "apent": NISTTests.approximate_entropy(bits)
+                "apent": NISTTests.approximate_entropy(bits),
+                "chi": chi_p,
+                "chi_stat": chi_stat
             })
 
             print(f"  fingerprint : {fp[:16]}...")
@@ -81,15 +90,31 @@ class Phase3Compare:
                 print(f"  Shared factors : {shared} pairs")
 
             passes = 0
-            total = len(s["nist"]) * 5
+            total = len(s["nist"]) * 6
             for entry in s["nist"]:
                 if entry["freq"]  >= 0.01: passes += 1
                 if entry["block"] >= 0.01: passes += 1
                 if entry["runs"]  >= 0.01: passes += 1
                 if entry["lrun"]  >= 0.01: passes += 1
                 if entry["apent"] >= 0.01: passes += 1
+                if entry["chi"]   >= 0.01: passes += 1
 
             print(f"  NIST pass rate : {passes}/{total} ({passes/total:.2%})")
+            
+            # Chi-square statistics
+            chi_stats = [entry["chi_stat"] for entry in s["nist"]]
+            chi_pvals = [entry["chi"] for entry in s["nist"]]
+            print(f"  Chi-square stats:")
+            print(f"    Avg χ² = {sum(chi_stats)/len(chi_stats):.4f}")
+            print(f"    Avg p-value = {sum(chi_pvals)/len(chi_pvals):.4f}")
+            
+            # Predictability statistics
+            pred_vals = s["predictability"]
+            print(f"  Predictability (correlation):")
+            print(f"    Avg r = {sum(pred_vals)/len(pred_vals):.6f}")
+            print(f"    Min r = {min(pred_vals):.6f}")
+            print(f"    Max r = {max(pred_vals):.6f}")
+            print(f"    |Avg r| = {abs(sum(pred_vals)/len(pred_vals)):.6f} (closer to 0 is better)")
 
         b = self.stats["baseline"]
         e = self.stats["emn"]
@@ -119,6 +144,30 @@ class Phase3Compare:
         else:
             print(f"* EMN ran slightly faster (likely normal variance).")
 
+        # Chi square comparison
+        avg_chi_b = sum([entry["chi_stat"] for entry in b["nist"]]) / len(b["nist"])
+        avg_chi_e = sum([entry["chi_stat"] for entry in e["nist"]]) / len(e["nist"])
+        if avg_chi_e < avg_chi_b:
+            print(f"* EMN shows better chi-square statistics (avg χ² {avg_chi_e:.4f} vs {avg_chi_b:.4f}).")
+        else:
+            print(f"* Baseline shows better chi-square statistics (avg χ² {avg_chi_b:.4f} vs {avg_chi_e:.4f}).")
+
+        # p-value comparison
+        avg_p_b = sum([entry["chi"] for entry in b["nist"]]) / len(b["nist"])
+        avg_p_e = sum([entry["chi"] for entry in e["nist"]]) / len(e["nist"])
+        if avg_p_e > avg_p_b:
+            print(f"* EMN shows higher chi-square p-values (avg p {avg_p_e:.4f} vs {avg_p_b:.4f}).")
+        else:
+            print(f"* Baseline shows higher chi-square p-values (avg p {avg_p_b:.4f} vs {avg_p_e:.4f}).")
+
+        # Predictability comparison
+        avg_pred_b = sum(b["predictability"]) / len(b["predictability"])
+        avg_pred_e = sum(e["predictability"]) / len(e["predictability"])
+        if abs(avg_pred_e) < abs(avg_pred_b):
+            print(f"* EMN shows lower predictability (avg r {avg_pred_e:.6f} vs {avg_pred_b:.6f}).")
+        else:
+            print(f"* Baseline shows lower predictability (avg r {avg_pred_b:.6f} vs {avg_pred_e:.6f}).")
+
 def main():
     sim = LowEntropySim(bits=16)
     def baseline_randfunc():
@@ -129,7 +178,7 @@ def main():
         return rf
     
     from phase2_emn import EMN_PRNG,SHA256CTR
-    emn = EMN_PRNG(P_seed=None,injection_frequency=4)
+    emn = EMN_PRNG(P_seed=None,injection_frequency=10)
     def emn_randfunc():
         O = emn.next_output()
         ctr = SHA256CTR(O)
