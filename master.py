@@ -17,7 +17,7 @@ def main():
         return ctr.read
 
     cmp = Phase3Compare(
-        num_keys=100,
+        num_keys=10000,
         key_size=1024,
         emn_func=emn_randfunc
     )
