@@ -33,7 +33,7 @@ class Phase3Compare:
                 s["predictability"].append(NISTTests.predictability(mod_bytes))
 
                 bits = NISTTests._to_bits(key.n)
-                chi_stat, chi_p = NISTTests.chi_square(bits, return_statistic=True)
+                chi_stat, chi_p = NISTTests.chi_square(bits) # type: ignore
                 s["nist"].append({
                     "freq": NISTTests.frequency(bits),
                     "block": NISTTests.block_frequency(bits),
@@ -49,21 +49,21 @@ class Phase3Compare:
         # Custom RNG (EMN)
         elif randfunc is not None:
             for i in range(self.n):
-                print(f"Generating key {i+1}/{self.n} ...")
+                # print(f"Generating key {i+1}/{self.n} ...")
                 t0 = time.time()
                 key = RSA.generate(self.ks, randfunc=randfunc())
                 t1 = time.time() - t0
 
                 fp = hashlib.sha256(f"{key.n}:{key.e}".encode()).hexdigest()
-                mod_bytes = key.n.to_bytes((key.n.bit_length() + 7) // 8, "big")
-                ent = shannon_entropy_from_mod(mod_bytes)
+                public_n_in_bytes = key.n.to_bytes((key.n.bit_length() + 7) // 8, "big")
+                ent = shannon_entropy_from_mod(public_n_in_bytes)
                 s["fps"].append(fp)
                 s["ents"].append(ent)
                 s["times"].append(t1)
                 s["mods"].append(key.n)
 
-                bits = NISTTests._to_bits(key.n)
-                chi_stat, chi_p = NISTTests.chi_square(bits, return_statistic=True)
+                bits = NISTTests._to_bits(key.n) # Get the key's public n and convert to bits
+                chi_stat, chi_p = NISTTests.chi_square(bits) # type: ignore
                 s["nist"].append({
                     "freq": NISTTests.frequency(bits),
                     "block": NISTTests.block_frequency(bits),
@@ -74,11 +74,9 @@ class Phase3Compare:
                     "chi_stat": chi_stat
                 })
 
-                s["predictability"].append(NISTTests.predictability(mod_bytes))
+                s["predictability"].append(NISTTests.predictability(public_n_in_bytes))
 
-                print(f"  fingerprint : {fp[:16]}...")
-                print(f"  entropy     : {ent:.4f} bits/byte")
-                print(f"  time        : {t1:.4f}s\n")
+                print(f"Key {i+1}: Entropy={ent:.2f}, FP={fp[:8]}..., Time={t1:.4f}s")
 
     def run(self):
         # MT baseline
