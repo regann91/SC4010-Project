@@ -1,21 +1,15 @@
-from phase1_baseline import LowEntropySim,ShannonEntropy,NISTTests
 from phase2_emn import EMN_PRNG,SHA256CTR
 from phase3_comparison import Phase3Compare
-from phase4_analysis import plot_entropy_comparison,plot_nist_pass_rates,plot_chi_square_comparison,plot_predictability_comparison
-
-import random
+from phase4_analysis import (
+    plot_entropy_comparison,
+    plot_nist_pass_rates,
+    plot_chi_square_comparison,
+    plot_predictability_comparison
+)
 
 def main():
-    sim = LowEntropySim(bits=16)
     
     emn = EMN_PRNG(P_seed=None,injection_frequency=10)
-
-    def baseline_randfunc():
-        seed = sim.get_seed()
-        random.seed(seed)
-        def rf(n):
-            return random.getrandbits(8 * n).to_bytes(n,"big")
-        return rf
 
     def emn_randfunc():
         O = emn.next_output()
@@ -23,9 +17,8 @@ def main():
         return ctr.read
 
     cmp = Phase3Compare(
-        num_keys=1000,
+        num_keys=100,
         key_size=1024,
-        baseline_func=baseline_randfunc,
         emn_func=emn_randfunc
     )
 

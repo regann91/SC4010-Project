@@ -5,13 +5,6 @@ from typing import Union, Tuple
 import numpy as np
 from scipy.stats import chisquare
 
-class LowEntropySim:
-    def __init__(self,bits=16):
-        self.bytes_needed = bits // 8
-
-    def get_seed(self):
-        return os.urandom(self.bytes_needed)
-
 class ShannonEntropy:
     @staticmethod
     def shannon(val):
@@ -60,17 +53,9 @@ class NISTTests:
     def runs(bits):
         n = len(bits)
         pi = bits.count('1') / n
-        if abs(pi - 0.5) >= 0.25:
-            return 0.0  # auto fail
-
-        V = 1
-        for i in range(1,n):
-            if bits[i] != bits[i-1]:
-                V += 1
-
-        p = math.erfc(abs(V - 2*n*pi*(1-pi)) /
-                      (2*math.sqrt(2*n)*pi*(1-pi)))
-        return p
+        if abs(pi - 0.5) >= 0.25: return 0.0
+        V = 1 + sum(bits[i] != bits[i-1] for i in range(1,n))
+        return math.erfc(abs(V - 2*n*pi*(1-pi)) / (2*math.sqrt(2*n)*pi*(1-pi)))
 
     @staticmethod
     def longest_run(bits):
@@ -180,47 +165,61 @@ class NISTTests:
         r = numerator / denominator
         
         return r
-
 class RSAUtil:
     @staticmethod
-    def generate_key(size=1024,seed=None):
-        if seed: random.seed(seed)
-        return RSA.generate(size)
-
-    @staticmethod
-    def gcd(a,b):
+    def gcd(a, b):
         while b:
-            a,b = b,a % b
+            a, b = b, a % b
         return a
 
-class Experiment:
-    def __init__(self,n_keys=10,entropy_bits=16,key_size=1024):
-        self.n_keys,self.key_size = n_keys,key_size
-        self.sim = LowEntropySim(entropy_bits)
-        self.results = []
+class RSAExperimentBase:
+    def __init__(self, n_keys=10, key_size=1024):
+        self.n_keys = n_keys
+        self.key_size = key_size
+        self.results = []   # stores (key, fp, entropy)
+
+    def gen_seed(self, _):
+        raise NotImplementedError
+
+    def apply_seed(self, seed):
+        raise NotImplementedError
 
     def run(self):
-        print(f"Running {self.n_keys} keys with {self.sim.bytes_needed*8} bits entropy")
+        print(f"--- Running {self.n_keys} RSA key generations ---")
         for i in range(self.n_keys):
-            seed = self.sim.get_seed()
-            key = RSAUtil.generate_key(self.key_size,seed)
+            seed = self.gen_seed(i)
+            self.apply_seed(seed)
+            t0 = time.time()
+            if hasattr(self, '_mt_rng'):
+                key = RSA.generate(self.key_size, randfunc=self._mt_rng.get_bytes)
+            else:
+                key = RSA.generate(self.key_size)  # OS entropy baseline
+            t1 = time.time() - t0
+
             fp = ShannonEntropy.fingerprint(key)
             ent = ShannonEntropy.shannon(key.n)
-            self.results.append((key,seed,fp,ent))
-            print(f"Key {i+1}: entropy={ent:.2f},fingerprint={fp[:8]}...")
+
+            self.results.append((key, fp, ent,t1))
+            print(f"Key {i+1}: Entropy={ent:.2f}, FP={fp[:8]}..., Time={t1:.4f}s")
+
         print()
 
     def analyze(self):
         print(f"--- Analysis of generated keys ---")
-        fps = [r[2] for r in self.results]
-        entropies = [r[3] for r in self.results]
-        keys_total = self.n_keys
-        keys_unique = len(set(fps))
-        keys_duplicate = keys_total - keys_unique
 
-        print(f"Total keys: {keys_total}")
-        print(f"Unique keys: {keys_unique}")
+        fps = [fp for _, fp, _, _ in self.results]
+        entropies = [ent for _, _, ent, _ in self.results]
+        times = [t1 for _, _, _, t1 in self.results]
+
+        total_keys = self.n_keys
+        unique_keys = len(set(fps))
+        keys_duplicate = total_keys - unique_keys
+
+        print(f"Total keys: {total_keys}")
+        print(f"Unique keys: {unique_keys}")
         print(f"Duplicate keys: {keys_duplicate}")
+        avg_time = sum(times)/len(times)
+        print(f"Avg time per key: {avg_time:.4f}s")
 
         avg_entropy = sum(entropies)/len(entropies)
         min_entropy = min(entropies)
@@ -229,9 +228,12 @@ class Experiment:
         print(f"Shannon Entropy (modulus) stats:")
         print(f"  Avg: {avg_entropy:.4f} bits/byte")
         print(f"  Min: {min_entropy:.4f}")
-        print(f"  Max: {max_entropy:.4f}")
+        print(f"  Max: {max_entropy:.4f}\n")
 
-        print(f"NIST SP 800-22 Tests (modulus bits)")
+        # -------------------------
+        # NIST Tests
+        # -------------------------
+        print("NIST SP 800-22 Tests (modulus bits)")
         nist_summary = {
             "frequency": 0,
             "block_frequency": 0,
@@ -240,20 +242,20 @@ class Experiment:
             "approx_entropy": 0,
             "chi_square": 0
         }
-        total_tests = len(self.results)
-        for idx,(key,*_ ) in enumerate(self.results):
+
+        for idx, (key, _, _, _) in enumerate(self.results):
             bits = NISTTests._to_bits(key.n)
+
             p1 = NISTTests.frequency(bits)
             p2 = NISTTests.block_frequency(bits)
             p3 = NISTTests.runs(bits)
             p4 = NISTTests.longest_run(bits)
             p5 = NISTTests.approximate_entropy(bits)
-            chi_result = NISTTests.chi_square(bits, return_statistic=True)
-            chi_stat, p6 = chi_result if isinstance(chi_result, tuple) else (0.0, chi_result)
+            chi_stat, p6 = NISTTests.chi_square(bits, return_statistic=True)
 
-            if p1 >= 0.01: nist_summary["frequency_test"] += 1
-            if p2 >= 0.01: nist_summary["block_frequency_test"] += 1
-            if p3 >= 0.01: nist_summary["runs_test"] += 1
+            if p1 >= 0.01: nist_summary["frequency"] += 1
+            if p2 >= 0.01: nist_summary["block_frequency"] += 1
+            if p3 >= 0.01: nist_summary["runs"] += 1
             if p4 >= 0.01: nist_summary["longest_run"] += 1
             if p5 >= 0.01: nist_summary["approx_entropy"] += 1
             if p6 >= 0.01: nist_summary["chi_square"] += 1
@@ -264,25 +266,34 @@ class Experiment:
             print(f"  Runs test p={p3:.4f}")
             print(f"  Longest run p={p4:.4f}")
             print(f"  Approx entropy p={p5:.4f}")
-            print(f"  Chi-square test: χ²={chi_stat:.4f}, p={p6:.4f}")
-            
-        print(f"NIST Test Summary:")
-        for test,passed in nist_summary.items():
-            print(f"  {test.replace('_',' ').title()}: {passed}/{total_tests} passed")
+            print(f"  Chi-square test: χ²={chi_stat:.4f}, p={p6:.4f}\n")
 
+        # -------------------------
+        # NIST Summary
+        # -------------------------
+        print("NIST Test Summary:")
+        for test, passed in nist_summary.items():
+            print(f"  {test.replace('_',' ').title()}: {passed}/{total_keys} passed")
+
+        # -------------------------
+        # Shared Factor Check (very important!)
+        # -------------------------
         shared = 0
-        for i,(k1,*_ ) in enumerate(self.results):
-            for j,(k2,*_ ) in enumerate(self.results[i+1:],i+1):
-                if RSAUtil.gcd(k1.n,k2.n) > 1:
+        for i, (k1, _, _, _) in enumerate(self.results):
+            for j, (k2, _, _, _) in enumerate(self.results[i+1:], i+1):
+                if RSAUtil.gcd(k1.n, k2.n) > 1:
                     shared += 1
-                    print(f"Keys {i+1} & {j+1} share a factor")
+                    print(f"  Keys {i+1} & {j+1} share a factor!")
 
         if shared == 0:
-            print("No shared factors detected.")
+            print("\nNo shared factors detected.")
         else:
-            print(f"Total pairs with shared factors: {shared}")
+            print(f"\nTotal pairs with shared factors: {shared}")
 
-        print("Conclusion:")
+        # -------------------------
+        # Conclusions
+        # -------------------------
+        print("\nConclusion:")
         if keys_duplicate > 0:
             print("  Low entropy caused duplicate keys.")
         if shared > 0:
@@ -290,25 +301,63 @@ class Experiment:
         if avg_entropy < 7.5:
             print("  Modulus entropy lower than expected; randomness weak.")
 
-        nist_pass_rate = sum(nist_summary.values()) / (5 * total_tests)
+        # NIST pass rate
+        nist_pass_rate = sum(nist_summary.values()) / (6 * total_keys)
 
         if nist_pass_rate < 0.5:
-            print("  Most NIST tests did not pass. The randomness in the generated keys appears weak.")
+            print("  Most NIST tests did not pass — randomness is weak.")
         elif nist_pass_rate < 0.8:
-            print("  NIST results are mixed; some randomness is present but still questionable.")
+            print("  NIST results are mixed — randomness questionable.")
         else:
-            print("  NIST results look mostly healthy. No significant randomness issues detected.")
+            print("  NIST results look healthy — randomness acceptable.")
+
+        print()
+
+class MTByteGenerator:
+    def __init__(self, seed_bytes):
+        # Seed MT with your low-entropy seed
+        seed_int = int.from_bytes(seed_bytes, "big")
+        random.seed(seed_int)
+
+    def get_bytes(self, n):
+        # Produce n bytes from MT PRNG
+        return bytes([random.getrandbits(8) for _ in range(n)])
+
+
+class MTBaseline(RSAExperimentBase):
+    def __init__(self, n_keys=10, entropy_bits=16, key_size=1024):
+        super().__init__(n_keys, key_size)
+        self.entropy_bytes = entropy_bits // 8
+
+    def gen_seed(self, _):
+        return os.urandom(self.entropy_bytes)
+
+    def apply_seed(self, seed):
+        self._mt_rng = MTByteGenerator(seed)
+
+
+class OSBaseline(RSAExperimentBase):
+    def gen_seed(self, _):
+        return None  # unused
+
+    def apply_seed(self, seed):
+        # DO NOTHING — RSA.generate now uses SystemRandom exclusively
+        random.seed()  # reseed using OS entropy, not custom seed
 
 def main():
-    print("=== Expt 1: Low entropy 16 bits ===")
-    exp1 = Experiment(n_keys=10,entropy_bits=16)
-    exp1.run()
-    exp1.analyze()
+    print("\n==============================")
+    print(" Baseline A: Mersenne Twister")
+    print("==============================")
+    mt = MTBaseline(n_keys=10, entropy_bits=16)
+    mt.run()
+    mt.analyze()
 
-    print("=== Expt 2: Moderate entropy 32 bits ===")
-    exp2 = Experiment(n_keys=10,entropy_bits=32)
-    exp2.run()
-    exp2.analyze()
+    print("\n==============================")
+    print(" Baseline B: SystemRandom (OS entropy)")
+    print("==============================")
+    osrng = OSBaseline(n_keys=10)
+    osrng.run()
+    osrng.analyze()
 
 if __name__ == "__main__":
     main()
