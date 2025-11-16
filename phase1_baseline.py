@@ -83,88 +83,69 @@ class NISTTests:
         return p
 
     @staticmethod
-    def chi_square(bits: str, num_bins: int = 16, return_statistic: bool = False) -> Union[float, Tuple[float, float]]:
-        """Chi-square test for uniformity of random bits.
-        Divides bits into bytes and checks if byte values are uniformly distributed.
-        
-        Args:
-            bits: Binary string to test
-            num_bins: Number of bins for chi-square test (default 16)
-            return_statistic: If True, returns (statistic, p_value), else just p_value
-        
-        Returns:
-            Union[float, Tuple[float, float]]: Either p_value alone or (chi_square_statistic, p_value)
-        """
-        
+    def chi_square(bits: str, num_bins: int = 16) -> Tuple[float, float]:
+        # We need to obtain observed frequencies of byte values (0-255)
+        # and the expected frequencies assuming uniform distribution to pass
+        # in to scipy.stats.chisquare
+
         n = len(bits)
-        if n < 8:
-            return (0.0, 0.0) if return_statistic else 0.0
+        if n < 8: return (0.0, 0.0)
         
         # Convert bits to bytes
-        byte_values = []
-        for i in range(0, n - 7, 8):
-            byte_str = bits[i:i+8]
-            byte_val = int(byte_str, 2)
-            byte_values.append(byte_val)
+        byte_values = [] # list of byte values
+        for i in range(0, n - 7, 8): # Step by 8 bits in our bitstream
+            byte_str = bits[i:i+8] # Get 8 bits
+            byte_val = int(byte_str, 2) # Convert to integer
+            byte_values.append(byte_val) # Append to list
         
         if len(byte_values) < num_bins:
-            return (0.0, 0.0) if return_statistic else 0.0
+            return (0.0, 0.0)
         
-        # Count frequencies for all 256 possible byte values
-        observed = np.zeros(256, dtype=int)
+        # Count observed frequencies for all 256 possible byte values
+        observed = np.zeros(256, dtype=int) # Initialize counts to zero for each type of byte
         for val in byte_values:
-            observed[val] += 1
+            observed[val] += 1 # Increment count for this byte value
         
-        # Expected frequency for uniform distribution
+        # Expected frequency for uniform distribution, each byte value should appear equally often
+        # We expect each byte value to appear (no. of bytes) / 256 times
         expected = np.full(256, len(byte_values) / 256)
         
-        # Calculate chi-square test using scipy
+        # Pass to chisquare function
         chi_sq, p_value = chisquare(f_obs=observed, f_exp=expected)
         
-        return (chi_sq, p_value) if return_statistic else p_value
+        return (chi_sq, p_value)
 
     @staticmethod
-    def predictability(sequence: Union[bytes, list, np.ndarray]) -> float:
-        """Predictability test using correlation coefficient.
-        Assesses the correlation between successive RNG outputs.
+    def predictability(key_n: bytes) -> float:
+        # Predictability assesses the correlation between successive RNG outputs
+        # Formula: r = Σ(x_i - μ)(x_{i+1} - μ) / Σ(x_i - μ)²
+        # Numerator sums till len(x)-1, denominator sums all x
+        # Returns: Correlation coefficient r. Value closer to zero indicates lower predictability.
         
-        Formula: r = Σ(x_i - μ)(x_{i+1} - μ) / Σ(x_i - μ)²
+        # Convert bytes to list of integers
+        x = list(key_n)
         
-        Args:
-            sequence: Sequence of RNG outputs (bytes, list, or numpy array)
-        
-        Returns:
-            float: Correlation coefficient. Value closer to zero indicates lower predictability.
-        """
-        # Convert to numpy array for efficient computation
-        if isinstance(sequence, bytes):
-            x = np.frombuffer(sequence, dtype=np.uint8)
-        elif isinstance(sequence, list):
-            x = np.array(sequence, dtype=np.float64)
-        else:
-            x = np.array(sequence, dtype=np.float64)
-        
-        n = len(x)
-        if n < 2:
-            return 0.0
+        # Need at least 2 values to compute correlation
+        if len(x) < 2: return 0.0
         
         # Calculate mean
-        mu = np.mean(x)
+        μ = sum(x) / len(x)
         
         # Calculate numerator: Σ(x_i - μ)(x_{i+1} - μ)
-        # x[:-1] gives x_i, x[1:] gives x_{i+1}
-        numerator = np.sum((x[:-1] - mu) * (x[1:] - mu))
+        numerator = 0.0
+        for i in range(len(x) - 1): # sum up to len(x)-1
+            numerator += (x[i] - μ) * (x[i+1] - μ)
         
-        # Calculate denominator: Σ(x_i - μ)²
-        denominator = np.sum((x - mu) ** 2)
+        # Calculate denominator: Σ(x_i - μ)², sum all x
+        denominator = 0.0
+        for i in range(len(x)):
+            diff = x[i] - μ
+            denominator += diff ** 2
         
         # Avoid division by zero
-        if denominator == 0:
-            return 0.0
-        
-        r = numerator / denominator
-        
-        return r
+        if denominator == 0: return 0.0
+        return numerator / denominator
+    
 class RSAUtil:
     @staticmethod
     def gcd(a, b):

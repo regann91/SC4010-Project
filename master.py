@@ -11,7 +11,7 @@ import math
 
 def main():
 
-    NUM_KEYS = 2000
+    NUM_KEYS = 4000
     TOTAL_INJECTIONS = 50
     # Ensure at least one injection
     INJECTION_FREQUENCY = max(math.ceil(NUM_KEYS / TOTAL_INJECTIONS), 1)
