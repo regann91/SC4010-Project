@@ -49,7 +49,7 @@ class Phase3Compare:
         # Custom RNG (EMN)
         elif randfunc is not None:
             for i in range(self.n):
-                print(f"Generating key {i+1}/{self.n} ...")
+                # print(f"Generating key {i+1}/{self.n} ...")
                 t0 = time.time()
                 key = RSA.generate(self.ks, randfunc=randfunc())
                 t1 = time.time() - t0
@@ -76,9 +76,7 @@ class Phase3Compare:
 
                 s["predictability"].append(NISTTests.predictability(mod_bytes))
 
-                print(f"  fingerprint : {fp[:16]}...")
-                print(f"  entropy     : {ent:.4f} bits/byte")
-                print(f"  time        : {t1:.4f}s\n")
+                print(f"Key {i+1}: Entropy={ent:.2f}, FP={fp[:8]}..., Time={t1:.4f}s")
 
     def run(self):
         # MT baseline

@@ -1,6 +1,104 @@
 import matplotlib.pyplot as plt
 import math
 
+def print_summary_table(cmp):
+    """Display a graphical summary table comparing MT, OS, and EMN RNGs"""
+    
+    def avg(lst):
+        return sum(lst) / len(lst) if lst else 0.0
+    
+    # Get stats for each RNG
+    mt = cmp.stats["mt"]
+    os_ = cmp.stats["os"]
+    emn = cmp.stats["emn"]
+    
+    # Calculate metrics
+    metrics = {}
+    for label, data in [("EMN", emn), ("SystemRandom", os_), ("MersenneTwister", mt)]:
+        # Chi-square statistic and p-value
+        chi_stats = [entry["chi_stat"] for entry in data["nist"]]
+        chi_pvals = [entry["chi"] for entry in data["nist"]]
+        
+        # Entropy
+        entropy = avg(data["ents"])
+        
+        # Predictability
+        predictability = avg(data["predictability"])
+        
+        # High-frequency time (avg time per key)
+        time_avg = avg(data["times"])
+        
+        # Runs test (observed/expected)
+        runs_obs = sum([entry["runs"] >= 0.01 for entry in data["nist"]])
+        runs_total = len(data["nist"])
+        
+        metrics[label] = {
+            "chi_stat": avg(chi_stats),
+            "chi_pval": avg(chi_pvals),
+            "entropy": entropy,
+            "predictability": predictability,
+            "time": time_avg,
+            "runs": f"{runs_obs}/{runs_total}"
+        }
+    
+    # Create table data
+    row_labels = ['Chi-Squared Statistic', 'Chi-Squared p-value', 'Entropy', 'Predictability', 
+                  'High-Frequency Time (seconds)', 'Runs Test (Passed/Total)']
+    col_labels = ['EMN', 'SystemRandom', 'MersenneTwister']
+    
+    table_data = [
+        [f"{metrics['EMN']['chi_stat']:.4f}", 
+         f"{metrics['SystemRandom']['chi_stat']:.4f}", 
+         f"{metrics['MersenneTwister']['chi_stat']:.4f}"],
+        [f"{metrics['EMN']['chi_pval']:.4f}", 
+         f"{metrics['SystemRandom']['chi_pval']:.4f}", 
+         f"{metrics['MersenneTwister']['chi_pval']:.4f}"],
+        [f"{metrics['EMN']['entropy']:.4f}", 
+         f"{metrics['SystemRandom']['entropy']:.4f}", 
+         f"{metrics['MersenneTwister']['entropy']:.4f}"],
+        [f"{metrics['EMN']['predictability']:.4f}", 
+         f"{metrics['SystemRandom']['predictability']:.4f}", 
+         f"{metrics['MersenneTwister']['predictability']:.4f}"],
+        [f"{metrics['EMN']['time']:.4f}", 
+         f"{metrics['SystemRandom']['time']:.4f}", 
+         f"{metrics['MersenneTwister']['time']:.4f}"],
+        [metrics['EMN']['runs'], 
+         metrics['SystemRandom']['runs'], 
+         metrics['MersenneTwister']['runs']],
+    ]
+    
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=(9, 4))
+    ax.axis('tight')
+    ax.axis('off')
+    
+    # Create table
+    table = ax.table(cellText=table_data,
+                     rowLabels=row_labels,
+                     colLabels=col_labels,
+                     cellLoc='center',
+                     loc='center',
+                     colWidths=[0.25, 0.25, 0.25])
+    
+    # Style the table
+    table.auto_set_font_size(False)
+    table.set_fontsize(11)
+    table.scale(1, 2)
+    
+    # Color header row
+    for i in range(len(col_labels)):
+        table[(0, i)].set_facecolor('#4CAF50')
+        table[(0, i)].set_text_props(weight='bold', color='white')
+    
+    # Color row labels
+    for i in range(len(row_labels)):
+        table[(i+1, -1)].set_facecolor('#E8E8E8')
+        table[(i+1, -1)].set_text_props(weight='bold')
+    
+    plt.title('RNG Comparison Summary Table', fontsize=14, fontweight='bold', pad=20)
+    plt.tight_layout()
+    plt.show()
+
 def plot_entropy_comparison(cmp):
     mt_ents = cmp.stats["mt"]["ents"]
     os_ents = cmp.stats["os"]["ents"]
