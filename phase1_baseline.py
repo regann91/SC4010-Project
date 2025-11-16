@@ -157,7 +157,7 @@ class RSAExperimentBase:
     def __init__(self, n_keys=10, key_size=1024):
         self.n_keys = n_keys
         self.key_size = key_size
-        self.results = []   # stores (key, fp, entropy)
+        self.results = []   # stores (key, fp, entropy, time)
 
     def gen_seed(self, _):
         raise NotImplementedError
