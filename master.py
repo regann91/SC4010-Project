@@ -1,15 +1,22 @@
 from phase2_emn import EMN_PRNG,SHA256CTR
 from phase3_comparison import Phase3Compare
 from phase4_analysis import (
+    print_summary_table,
     plot_entropy_comparison,
     plot_nist_pass_rates,
     plot_chi_square_comparison,
     plot_predictability_comparison
 )
+import math
 
 def main():
     
-    emn = EMN_PRNG(P_seed=None,injection_frequency=10)
+    NUM_KEYS = 4000
+    TOTAL_INJECTIONS = 50
+    # Ensure at least one injection
+    INJECTION_FREQUENCY = max(math.ceil(NUM_KEYS / TOTAL_INJECTIONS), 1)
+
+    emn = EMN_PRNG(P_seed=None,injection_frequency=INJECTION_FREQUENCY)
 
     def emn_randfunc():
         O = emn.next_output()
@@ -17,7 +24,7 @@ def main():
         return ctr.read
 
     cmp = Phase3Compare(
-        num_keys=10000,
+        num_keys=NUM_KEYS,
         key_size=1024,
         emn_func=emn_randfunc
     )
@@ -27,6 +34,7 @@ def main():
 
     emn.stop()
 
+    print_summary_table(cmp)
     plot_entropy_comparison(cmp)
     plot_nist_pass_rates(cmp)
     plot_chi_square_comparison(cmp)
